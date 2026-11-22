@@ -1,0 +1,20 @@
+# Python caches and environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# API keys (ANTHROPIC_API_KEY / OPENAI_API_KEY) never go into Git
+.env
+
+# Generated outputs: batch tables, evidence packs, LLM answers, logs.
+# Rebuild them with run_batch.py or build_curated_parquet.py.
+output/
+
+# Copies kept before the project used Git
+_backup_before_fix/
+
+# Personal viva and interview prep notes (kept on disk, not published)
+VIVA_AND_PLACEMENT_PREP.md
+Foundation_Model_for_Spectroscopy_Viva_Guide.html

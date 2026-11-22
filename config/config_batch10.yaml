@@ -1,0 +1,44 @@
+paths:
+  dataset_roots:
+  - E:/Batch10/Datasets
+  metadata_file: D:/zenodo_metadata.csv
+  papers_directory: E:/Batch10/papers
+  output_directory: C:/Users/Admin/RAG/2/output/batch10
+mapping:
+  mapping_file: null
+  allow_record_id_prefix_match: true
+  search_depth: 1
+  allow_exact_doi_directory_match: false
+  allow_exact_title_directory_match: false
+scanner:
+  inspect_archives: true
+  max_archive_members: 20000
+  max_archive_depth: 3
+  nested_archive_max_mb: 4096
+  skip_junk_members: true
+readers:
+  csv_delimiter_by_ext:
+    .csv: ','
+    .tsv: "\t"
+  numeric_header_min_count: 5
+  large_file_skip_mb: 1024
+  text_max_mb: 500
+  text_min_points: 10
+  text_accept_unlabelled_axis: true
+  fits_max_mb: 512
+pipeline:
+  extract_archive_members: true
+  archive_member_max_mb: 2048
+  write_empty_spectral_row: true
+  only_mapped_records: true
+  paper_evidence_max: 500
+llm:
+  provider: anthropic
+  model: null
+  effort: high
+  max_output_tokens: 32000
+  paper_max_chars: 60000
+  dataset_max_chars: 60000
+  concurrency: 4
+logging:
+  level: INFO

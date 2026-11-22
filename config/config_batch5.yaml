@@ -1,0 +1,88 @@
+# ============================================================
+# SPECTROSCOPY METADATA PIPELINE - BATCH 5
+# ============================================================
+#
+#   python pipeline.py --config config/config_batch5.yaml --all
+#   python build_curated_parquet.py --batch batch5 --output-dir C:/Users/Admin/RAG/2/output
+#
+# Batch5 layout: 35 records under D:/Batch5_datasets, each a folder
+# "<record_id>_<title>" (extracted Zenodo downloads, some with inner zips/rar).
+# The 15 records without spectra were moved to D:/Batch5_no_spectra and are
+# not processed. 16758266 (PCMO pump-probe, 5.7 GB HDF5) was re-downloaded
+# and restored on 2026-10-21. Batch5 papers now live in RAG/papers5.
+# 9 records are IODP shipboard datasets (RSC / SPEC). Very large records:
+# 14880579 (6.9 GB data.zip, ~129k members), 16417648 (8 GB IR parquet chunks),
+# 15771437 (PAH IR zips) - archive member limits below keep them bounded.
+# ============================================================
+
+paths:
+
+  dataset_roots:
+    - "D:/Batch5_datasets"
+
+  # Full Zenodo metadata; pipeline.only_mapped_records restricts --all to
+  # the records that actually exist under dataset_roots.
+  metadata_file: "D:/zenodo_metadata.csv"
+
+  # Papers named <record_id>.pdf; regex candidates are written as
+  # source_type='pdf' evidence.
+  papers_directory: "C:/Users/Admin/RAG/papers5"
+
+  # Automated outputs kept inside the RAG/2 project, next to the curated
+  # batch5_*.parquet files.
+  output_directory: "C:/Users/Admin/RAG/2/output/batch5"
+
+
+mapping:
+
+  # No explicit mapping needed: root folders named "<record_id>_..." are
+  # matched by record id.
+  mapping_file: null
+  allow_record_id_prefix_match: true
+  search_depth: 1
+  allow_exact_doi_directory_match: false
+  allow_exact_title_directory_match: false
+
+
+scanner:
+
+  inspect_archives: true
+  max_archive_members: 20000
+  max_archive_depth: 3
+  # Nested archives larger than this are listed but not opened.
+  nested_archive_max_mb: 4096
+  # __MACOSX/, ._*, .DS_Store, Thumbs.db
+  skip_junk_members: true
+
+
+readers:
+
+  csv_delimiter_by_ext:
+    .csv: ","
+    .tsv: "\t"
+
+  numeric_header_min_count: 5
+
+  # MAT/HDF5 files above this size: structure only.
+  large_file_skip_mb: 1024
+
+  text_max_mb: 500
+  text_min_points: 10
+  # Accept bare number columns (monotonic first column) at confidence 0.5;
+  # the unit is then taken from the dataset README when it states one.
+  text_accept_unlabelled_axis: true
+  fits_max_mb: 512
+
+
+pipeline:
+
+  extract_archive_members: true
+  archive_member_max_mb: 2048
+  write_empty_spectral_row: true
+  only_mapped_records: true
+  paper_evidence_max: 500
+
+
+logging:
+
+  level: "INFO"

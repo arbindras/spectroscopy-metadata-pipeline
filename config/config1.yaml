@@ -1,0 +1,36 @@
+paths:
+  metadata_file: /absolute/path/to/data/zenodo_metadata.parquet
+  dataset_roots:
+    - /absolute/path/to/data/datasets
+  output_directory: /absolute/path/to/catalog_output
+
+mapping:
+  # Optional CSV/Parquet with:
+  # record_id,dataset_local_path
+  mapping_file: null
+
+  # Only exact normalized DOI/title matches are allowed.
+  allow_exact_doi_directory_match: true
+  allow_exact_title_directory_match: true
+
+  # Limits directory discovery used for title/DOI matching.
+  search_depth: 2
+
+scanner:
+  inspect_archives: true
+  max_archive_members: 100000
+
+readers:
+  max_coordinate_values: 1000000
+  csv_chunk_size: 50000
+  xlsx_max_rows: 1000000
+  jcamp_max_header_bytes: 4194304
+
+pipeline:
+  confidence:
+    explicit_file_metadata: 0.99
+    file_structure: 1.0
+    calculated: 1.0
+    deterministic_name_match: 0.90
+
+  write_empty_spectral_row: true

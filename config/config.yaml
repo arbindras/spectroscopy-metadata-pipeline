@@ -1,0 +1,135 @@
+# ============================================================
+# SPECTROSCOPY METADATA PIPELINE CONFIGURATION
+# ============================================================
+#
+# This pipeline DOES NOT download datasets.
+#
+# It works with datasets that are already downloaded locally
+# or mounted through Google Drive.
+# ============================================================
+
+
+paths:
+
+  # Root directory containing dataset folders.
+  # dataset_roots:
+
+  #   - "/content/drive/MyDrive/SpectroscopyFoundationModel/spectroscopy_datasets"
+  dataset_roots:
+
+    - "D:/Batch0"
+
+  # Zenodo metadata.
+  #
+  # We will use a filtered version containing only datasets
+  # that actually have local folders.
+  metadata_file: "D:/zenodo_metadata.csv"
+
+
+  # Pipeline output directory.
+  output_directory: "D:/output"
+
+
+# ============================================================
+# DATASET MAPPING
+# ============================================================
+
+mapping:
+
+  # Explicit mapping generated from folder names.
+  #
+  # Expected columns:
+  #
+  # record_id
+  # folder_name
+  # dataset_local_path
+  #
+  mapping_file: "D:/scanned_dataset_folders.csv"
+
+
+  # Maximum folder depth used when searching directories.
+  search_depth: 1
+
+
+  # Disable fuzzy matching because explicit mapping is safer.
+  allow_exact_doi_directory_match: false
+
+  allow_exact_title_directory_match: false
+
+
+# ============================================================
+# FILE SCANNING
+# ============================================================
+
+scanner:
+
+  # Inspect files inside ZIP, TAR, and 7Z archives.
+  inspect_archives: true
+
+
+  # IMPORTANT:
+  #
+  # Do NOT start with 100000.
+  #
+  # Google Drive scanning can become extremely slow.
+  #
+  max_archive_members: 5000
+
+
+# ============================================================
+# FILE READERS
+# ============================================================
+
+readers:
+
+  csv_delimiter_by_ext:
+
+    .csv: ","
+
+    .tsv: "\t"
+
+
+  # Minimum numeric columns before considering a table
+  # potentially spectral data.
+  numeric_header_min_count: 5
+
+
+  # Large MAT files above this size should only have their
+  # structure inspected rather than loading the complete file.
+  large_file_skip_mb: 1024
+
+  # Plain-text spectra (.txt/.dat/...) larger than this are skipped.
+  text_max_mb: 500
+
+  # Minimum rows before a text file is considered a spectrum.
+  text_min_points: 10
+
+  # FITS primary images larger than this are not loaded.
+  fits_max_mb: 512
+
+
+# ============================================================
+# PIPELINE
+# ============================================================
+
+pipeline:
+
+  # Extract supported files (e.g. .nc, .csv, .txt) from ZIP/TAR
+  # archives into a temporary folder and read them.
+  extract_archive_members: true
+
+  # Skip archive members larger than this (MB).
+  archive_member_max_mb: 2048
+
+  # Write one all-NULL row when nothing is found (status is then
+  # "no_spectral_data" and the reason is in extraction_errors).
+  write_empty_spectral_row: true
+
+
+# ============================================================
+# LOGGING
+# ============================================================
+
+logging:
+
+  level: "INFO"

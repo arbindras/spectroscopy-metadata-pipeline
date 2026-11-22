@@ -1,0 +1,92 @@
+# ============================================================
+# SPECTROSCOPY METADATA PIPELINE - BATCH 8
+# ============================================================
+#
+#   python pipeline.py --config config/config_batch8.yaml --all
+#   python build_curated_parquet.py --batch batch8 --output-dir C:/Users/Admin/RAG/2/output
+#
+# or end to end (automated extraction + LLM curation + parquet build):
+#
+#   python run_batch.py --config config/config_batch8.yaml --batch batch8 --provider anthropic
+#
+# Batch8 layout: 104 records under E:/Batch8/Datasets, each a folder
+# "<record_id>_<title>". Papers are E:/Batch8/papers/<record_id>.pdf (9) or
+# PMC JATS articles <record_id>.xml (95). Records without spectra stay in
+# place; they are listed in curation/batch8_spectral.py NO_SPECTRA and are
+# left out of the curated parquet files.
+# Large records: 3712368 (3,714 files, 1.6 GB), 5392755 (1.35 GB),
+# 4946544 (0.9 GB), 4086845 (0.55 GB).
+# ============================================================
+
+paths:
+
+  dataset_roots:
+    - "E:/Batch8/Datasets"
+
+  # Full Zenodo metadata; pipeline.only_mapped_records restricts --all to
+  # the records that actually exist under dataset_roots.
+  metadata_file: "D:/zenodo_metadata.csv"
+
+  papers_directory: "E:/Batch8/papers"
+
+  output_directory: "C:/Users/Admin/RAG/2/output/batch8"
+
+
+mapping:
+
+  mapping_file: null
+  allow_record_id_prefix_match: true
+  search_depth: 1
+  allow_exact_doi_directory_match: false
+  allow_exact_title_directory_match: false
+
+
+scanner:
+
+  inspect_archives: true
+  max_archive_members: 20000
+  max_archive_depth: 3
+  nested_archive_max_mb: 4096
+  skip_junk_members: true
+
+
+readers:
+
+  csv_delimiter_by_ext:
+    .csv: ","
+    .tsv: "\t"
+
+  numeric_header_min_count: 5
+  large_file_skip_mb: 1024
+  text_max_mb: 500
+  text_min_points: 10
+  text_accept_unlabelled_axis: true
+  fits_max_mb: 512
+
+
+pipeline:
+
+  extract_archive_members: true
+  archive_member_max_mb: 2048
+  write_empty_spectral_row: true
+  only_mapped_records: true
+  paper_evidence_max: 500
+
+
+# LLM curation stage (llm_curation/). The API key is read from the
+# environment (ANTHROPIC_API_KEY / OPENAI_API_KEY) or a .env file next to
+# run_batch.py - never put it in this file.
+llm:
+
+  provider: "anthropic"          # anthropic | openai
+  model: null                    # default: claude-opus-5-5 / gpt-5.5
+  effort: "high"                 # Claude effort / OpenAI reasoning_effort
+  max_output_tokens: 32000
+  paper_max_chars: 60000
+  dataset_max_chars: 60000
+  concurrency: 4
+
+
+logging:
+
+  level: "INFO"
