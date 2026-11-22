@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import re
 import shutil
@@ -9,7 +10,7 @@ import tempfile
 import time
 from collections import Counter
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pandas as pd
 import yaml
@@ -30,7 +31,7 @@ from readers.spectral_helpers import modality_from_text, unit_from_text
 from readers.text_reader import TextReader
 from readers.xlsx_reader import XLSXReader
 from scanner import archive_access
-from scanner.dataset_scanner import DatasetMapper
+from scanner.dataset_scanner import ARCHIVE_SUFFIXES, DatasetMapper
 from scanner.file_indexer import FileIndexer
 from storage.parquet_writer import ParquetStore
 
@@ -51,6 +52,26 @@ READERS = [
 README_NAMES = ("readme", "read_me", "description", "about")
 README_EXTENSIONS = {"", ".txt", ".md", ".rst", ".rtf"}
 README_MAX_BYTES = 2 * 1024 * 1024
+
+# Files that yield spectra are fingerprinted so that byte-identical copies in
+# different folders count once; larger files are compared by location only.
+FINGERPRINT_MAX_BYTES = 64 * 1024 * 1024
+
+
+def file_fingerprint(path: Path) -> str | None:
+    """Size and BLAKE2 digest of a file's bytes, or None when the file is
+    larger than FINGERPRINT_MAX_BYTES or cannot be read."""
+    try:
+        size = path.stat().st_size
+        if size > FINGERPRINT_MAX_BYTES:
+            return None
+        digest = hashlib.blake2b(digest_size=16)
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return f"{size}:{digest.hexdigest()}"
 
 
 def load_config(path: str | Path) -> dict:
@@ -217,6 +238,7 @@ class Pipeline:
                 spectral_rows = []
                 evidence_rows = []
                 error_rows = []
+                fingerprints: dict[str, str] = {}
 
                 prefetch_dir = Path(tempfile.mkdtemp(prefix="spectro_tar_"))
                 try:
@@ -226,11 +248,16 @@ class Pipeline:
                             result = self._read_archive_member(
                                 record_id, dataset_path, file_row,
                                 local_file=prefetched.get(file_row["file_path"]),
+                                fingerprints=fingerprints,
                             )
                         else:
                             result = self._read_file(
                                 record_id, dataset_path, Path(file_row["file_path"])
                             )
+                            if result is not None and result.spectral_records:
+                                fingerprint = file_fingerprint(Path(file_row["file_path"]))
+                                if fingerprint:
+                                    fingerprints[file_row["file_path"]] = fingerprint
                         if result is None:
                             continue
                         spectral_rows.extend(result.spectral_records)
@@ -241,7 +268,7 @@ class Pipeline:
                     shutil.rmtree(prefetch_dir, ignore_errors=True)
 
                 spectral_rows, evidence_rows = self._deduplicate(
-                    spectral_rows, evidence_rows
+                    spectral_rows, evidence_rows, dataset_path, fingerprints
                 )
                 self._fill_axis_unit_from_readme(
                     record_id, dataset_path, spectral_rows, evidence_rows, file_rows
@@ -387,13 +414,15 @@ class Pipeline:
         dataset_path: Path,
         file_row: dict,
         local_file: Path | None = None,
+        fingerprints: dict[str, str] | None = None,
     ):
         """Extract one supported archive member to a temp dir and read it.
 
         The member may sit in nested containers (``a.zip::b.zip::c.txt``),
         a tar/tgz or rar, or a damaged zip recovered by local headers. Only
         members with a supported extension are extracted, and only up to
-        ``pipeline.archive_member_max_mb`` (default 2048 MB) each.
+        ``pipeline.archive_member_max_mb`` (default 2048 MB) each. A member
+        that yields spectra is fingerprinted into ``fingerprints``.
         """
         member = archive_access.split_virtual(file_row["file_path"])[1][-1]
         member_path = Path(member)
@@ -422,6 +451,10 @@ class Pipeline:
                 dataset_path=dataset_path,
                 file_path=target,
             )
+            if fingerprints is not None and result.spectral_records:
+                fingerprint = file_fingerprint(target)
+                if fingerprint:
+                    fingerprints[file_row["file_path"]] = fingerprint
         except Exception as exc:
             result = ReaderResult(errors=[{
                 "record_id": record_id,
@@ -446,32 +479,95 @@ class Pipeline:
     def _deduplicate(
         spectral_rows: list[dict],
         evidence_rows: list[dict],
+        dataset_path: str | Path | None = None,
+        fingerprints: dict[str, str] | None = None,
     ) -> tuple[list[dict], list[dict]]:
-        """Drop spectra that are the same data in two formats, e.g.
-        ``J0001.fits`` and ``J0001.txt`` with identical axis ranges."""
+        """Drop rows that describe the same spectra twice.
 
-        def stem(source: str | None) -> str:
-            source = (source or "").split("::")[-1]
-            return Path(source.replace("\\", "/")).stem.lower()
+        Rows with the same file stem, channel count and axis range are
+        duplicates only when
+
+        * their extensions differ: the same data saved in two formats, e.g.
+          ``J0001.fits`` and ``J0001.txt``; or
+        * they are copies of one file: byte-identical (``fingerprints`` maps
+          ``source_file`` to :func:`file_fingerprint`), e.g. a "Combined"
+          folder that repeats per-sample files; at the same path once every
+          archive is read as a folder named after it (``Data.zip::Raman/a.csv``
+          and the extracted ``Data/Raman/a.csv``; a nested zip and its
+          extracted twin); or a loose file and an archive member at the same
+          path (``run1/s.txt`` and ``data.zip::run1/s.txt``).
+
+        Same-named files of one format with different contents in different
+        folders or archives (``run1/spectrum.txt`` and ``run2/spectrum.txt``)
+        hold different spectra and are all kept.
+        """
+        fingerprints = fingerprints or {}
+        root = Path(dataset_path) if dataset_path else None
+
+        def folder_name(archive: str) -> str:
+            for suffix in ARCHIVE_SUFFIXES:
+                if archive.endswith(suffix):
+                    return archive[: -len(suffix)]
+            return archive
+
+        def location(source: str | None) -> tuple[bool, tuple[str, ...], tuple[str, ...]]:
+            """(inside an archive?, path with each archive as a folder, path
+            with archives left out), lower-case and relative to the dataset."""
+            pieces = str(source or "").replace("\\", "/").split("::")
+            head = Path(pieces[0])
+            if root is not None:
+                try:
+                    head = head.relative_to(root)
+                except ValueError:
+                    pass
+            as_folders = [part.lower() for part in PurePosixPath(head.as_posix()).parts]
+            left_out = list(as_folders)
+            for member in pieces[1:]:
+                if as_folders:  # the previous part is the archive holding this member
+                    as_folders[-1] = folder_name(as_folders[-1])
+                    left_out.pop()
+                parts = [part.lower() for part in PurePosixPath(member).parts]
+                as_folders += parts
+                left_out += parts
+            return len(pieces) > 1, tuple(as_folders), tuple(left_out)
 
         def rounded(value):
             # 5 significant digits: tolerant of float32 (FITS) vs text precision.
             return None if value is None else f"{float(value):.5g}"
 
-        seen: set[tuple] = set()
+        # Per stem/channels/range: the extensions, contents and locations kept.
+        groups: dict[tuple, dict[str, set]] = {}
         kept: list[dict] = []
         dropped_sources: set[str] = set()
         for row in spectral_rows:
+            source = row.get("source_file")
+            content = fingerprints.get(source)
+            inside, as_folders, left_out = location(source)
+            name = PurePosixPath(as_folders[-1] if as_folders else "")
             key = (
-                stem(row.get("source_file")),
+                name.stem,
                 row.get("num_spectral_channels"),
                 rounded(row.get("wavelength_min_nm") or row.get("spectral_range_original_min")),
                 rounded(row.get("wavelength_max_nm") or row.get("spectral_range_original_max")),
             )
-            if key in seen:
-                dropped_sources.add(row.get("source_file"))
+            group = groups.setdefault(
+                key,
+                {"suffixes": set(), "contents": set(), "folders": set(), "loose": set(), "members": set()},
+            )
+            other_format = bool(group["suffixes"] - {name.suffix})
+            copy = (
+                (content is not None and content in group["contents"])
+                or as_folders in group["folders"]
+                or left_out in group["loose" if inside else "members"]
+            )
+            if other_format or copy:
+                dropped_sources.add(source)
                 continue
-            seen.add(key)
+            group["suffixes"].add(name.suffix)
+            if content is not None:
+                group["contents"].add(content)
+            group["folders"].add(as_folders)
+            group["members" if inside else "loose"].add(left_out)
             kept.append(row)
 
         kept_sources = {row.get("source_file") for row in kept}
