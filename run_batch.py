@@ -3,7 +3,7 @@
 New batch from two folders (a config file is written for you):
 
     python run_batch.py --batch batch9 --datasets E:/Batch9/Datasets --papers E:/Batch9/papers --provider anthropic
-    python run_batch.py --batch batch9 --datasets E:/Batch9/Datasets --papers E:/Batch9/papers --provider openai --model gpt-5.1
+    python run_batch.py --batch batch9 --datasets E:/Batch9/Datasets --papers E:/Batch9/papers --provider openai --model gpt-5.5
 
 Existing config:
 
@@ -145,7 +145,7 @@ def main() -> int:
     parser.add_argument("--metadata", help=f"Zenodo metadata csv/parquet (default {DEFAULT_METADATA})")
     parser.add_argument("--output-root", help="output folder (default <project>/output)")
     parser.add_argument("--provider", choices=["anthropic", "openai"], help="LLM provider (default from config)")
-    parser.add_argument("--model", help="model id (default claude-opus-5-5 / gpt-5.1)")
+    parser.add_argument("--model", help="model id (default claude-opus-5-5 / gpt-5.5)")
     parser.add_argument("--steps", default=",".join(STEPS), help="comma list of: " + ", ".join(STEPS))
     parser.add_argument("--record-id", action="append", help="limit to these record ids (repeatable)")
     parser.add_argument("--source", choices=["auto", "llm", "module"], default="auto", help="curation source for build")
